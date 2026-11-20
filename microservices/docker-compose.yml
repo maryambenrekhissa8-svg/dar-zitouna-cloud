@@ -1,0 +1,53 @@
+services:
+  catalogue:
+    build: ./catalogue
+    container_name: catalogue
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - DB_PATH=/data/catalogue.db
+    volumes:
+      - catalogue-data:/data
+    networks:
+      - dar-zitouna-net
+
+  notifications:
+    build: ./notifications
+    container_name: notifications
+    ports:
+      - "5003:5003"
+    environment:
+      - PORT=5003
+      - DB_PATH=/data/notifications.db
+    volumes:
+      - notifications-data:/data
+    networks:
+      - dar-zitouna-net
+
+  commandes:
+    build: ./commandes
+    container_name: commandes
+    ports:
+      - "5002:5002"
+    environment:
+      - PORT=5002
+      - DB_PATH=/data/commandes.db
+      - CATALOGUE_URL=http://catalogue:5001
+      - NOTIFICATIONS_URL=http://notifications:5003
+    volumes:
+      - commandes-data:/data
+    networks:
+      - dar-zitouna-net
+    depends_on:
+      - catalogue
+      - notifications
+
+networks:
+  dar-zitouna-net:
+    driver: bridge
+
+volumes:
+  catalogue-data:
+  commandes-data:
+  notifications-data:
