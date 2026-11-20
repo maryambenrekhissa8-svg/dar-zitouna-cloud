@@ -43,6 +43,23 @@ services:
       - catalogue
       - notifications
 
+  site:
+    build: ./site
+    container_name: site
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - CATALOGUE_URL=http://catalogue:5001
+      - COMMANDES_URL=http://commandes:5002
+      - NOTIFICATIONS_URL=http://notifications:5003
+    networks:
+      - dar-zitouna-net
+    depends_on:
+      - catalogue
+      - commandes
+      - notifications
+
 networks:
   dar-zitouna-net:
     driver: bridge
