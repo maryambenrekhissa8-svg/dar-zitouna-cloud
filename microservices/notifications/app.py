@@ -1,30 +1,39 @@
 import os
-import sqlite3
+import time
 from datetime import datetime
 
+import psycopg
 from flask import Flask, jsonify, request
+from psycopg.rows import dict_row
 
 app = Flask(__name__)
 
-DB_PATH = os.environ.get("DB_PATH", "notifications.db")
 PORT = int(os.environ.get("PORT", 5003))
+# Adresse de la base PostgreSQL du service (fournie par docker-compose.yml)
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL", "postgresql://dar_zitouna:dar_zitouna_mdp@localhost:5432/notifications_db"
+)
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
-    with get_db() as conn:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS notifications ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "order_id INTEGER, client TEXT, message TEXT NOT NULL, "
-            "created_at TEXT NOT NULL)"
-        )
+    # PostgreSQL peut mettre quelques secondes a demarrer : on reessaie
+    for _ in range(30):
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS notifications ("
+                    "id SERIAL PRIMARY KEY, order_id INTEGER, client TEXT, "
+                    "message TEXT NOT NULL, created_at TEXT NOT NULL)"
+                )
+            return
+        except psycopg.OperationalError:
+            print("En attente de PostgreSQL...", flush=True)
+            time.sleep(2)
+    raise RuntimeError("Impossible de se connecter a PostgreSQL")
 
 
 @app.route("/notify", methods=["POST"])
@@ -36,12 +45,11 @@ def envoyer_notification():
 
     date = datetime.now().isoformat(timespec="seconds")
     with get_db() as conn:
-        cur = conn.execute(
+        notif_id = conn.execute(
             "INSERT INTO notifications (order_id, client, message, created_at) "
-            "VALUES (?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s) RETURNING id",
             (data.get("order_id"), data.get("client"), message, date),
-        )
-        notif_id = cur.lastrowid
+        ).fetchone()["id"]
 
     # Dans un vrai systeme, on enverrait ici un e-mail ou un SMS.
     print(f"[NOTIFICATION] {data.get('client')} : {message}", flush=True)
@@ -59,10 +67,8 @@ def envoyer_notification():
 @app.route("/notifications", methods=["GET"])
 def liste_notifications():
     with get_db() as conn:
-        lignes = conn.execute(
-            "SELECT * FROM notifications ORDER BY id"
-        ).fetchall()
-    return jsonify([dict(l) for l in lignes])
+        lignes = conn.execute("SELECT * FROM notifications ORDER BY id").fetchall()
+    return jsonify(lignes)
 
 
 @app.route("/health", methods=["GET"])

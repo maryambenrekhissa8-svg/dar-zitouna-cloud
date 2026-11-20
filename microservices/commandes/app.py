@@ -1,35 +1,45 @@
 import os
-import sqlite3
+import time
 from datetime import datetime
 
+import psycopg
 import requests
 from flask import Flask, jsonify, request
+from psycopg.rows import dict_row
 
 app = Flask(__name__)
 
-DB_PATH = os.environ.get("DB_PATH", "commandes.db")
 PORT = int(os.environ.get("PORT", 5002))
+# Adresse de la base PostgreSQL du service (fournie par docker-compose.yml)
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL", "postgresql://dar_zitouna:dar_zitouna_mdp@localhost:5432/commandes_db"
+)
 # Adresses des autres services sur le reseau Docker
 CATALOGUE_URL = os.environ.get("CATALOGUE_URL", "http://catalogue:5001")
 NOTIFICATIONS_URL = os.environ.get("NOTIFICATIONS_URL", "http://notifications:5003")
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
-    with get_db() as conn:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS orders ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "client TEXT NOT NULL, product_id INTEGER NOT NULL, "
-            "product_name TEXT NOT NULL, quantity INTEGER NOT NULL, "
-            "total REAL NOT NULL, created_at TEXT NOT NULL)"
-        )
+    # PostgreSQL peut mettre quelques secondes a demarrer : on reessaie
+    for _ in range(30):
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS orders ("
+                    "id SERIAL PRIMARY KEY, client TEXT NOT NULL, "
+                    "product_id INTEGER NOT NULL, product_name TEXT NOT NULL, "
+                    "quantity INTEGER NOT NULL, total DOUBLE PRECISION NOT NULL, "
+                    "created_at TEXT NOT NULL)"
+                )
+            return
+        except psycopg.OperationalError:
+            print("En attente de PostgreSQL...", flush=True)
+            time.sleep(2)
+    raise RuntimeError("Impossible de se connecter a PostgreSQL")
 
 
 @app.route("/orders", methods=["POST"])
@@ -57,12 +67,11 @@ def creer_commande():
     total = round(produit["price"] * quantity, 2)
     date = datetime.now().isoformat(timespec="seconds")
     with get_db() as conn:
-        cur = conn.execute(
+        order_id = conn.execute(
             "INSERT INTO orders (client, product_id, product_name, quantity, total, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
             (client, product_id, produit["name"], quantity, total, date),
-        )
-        order_id = cur.lastrowid
+        ).fetchone()["id"]
 
     # 3. Appel au service Notifications pour prevenir le client
     message = (f"Commande {order_id} confirmee : {quantity} x {produit['name']}, "
@@ -93,7 +102,7 @@ def creer_commande():
 def liste_commandes():
     with get_db() as conn:
         lignes = conn.execute("SELECT * FROM orders ORDER BY id").fetchall()
-    return jsonify([dict(l) for l in lignes])
+    return jsonify(lignes)
 
 
 @app.route("/health", methods=["GET"])

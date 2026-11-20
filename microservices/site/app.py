@@ -236,7 +236,7 @@ PAGE = """
 
 </main>
 
-<footer>Dar Zitouna &middot; Mini-projet Cloud Computing &middot; 4 conteneurs sur le réseau dar-zitouna-net</footer>
+<footer>Dar Zitouna &middot; Mini-projet Cloud Computing &middot; 5 conteneurs sur le réseau dar-zitouna-net &middot; données dans PostgreSQL</footer>
 </body>
 </html>
 """
@@ -289,6 +289,11 @@ def commander():
         return redirect(url_for("accueil", ok=rep.json()["id"]))
     message = rep.json().get("erreur", "La commande a échoué.")
     return redirect(url_for("accueil", erreur=message))
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return {"service": "site", "status": "ok"}
 
 
 if __name__ == "__main__":

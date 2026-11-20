@@ -1,0 +1,58 @@
+name: CI - Dar Zitouna
+
+# Le pipeline se lance a chaque envoi (push) sur GitHub
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Construire les images et tester
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microservices
+
+    steps:
+      - name: Recuperer le code du depot
+        uses: actions/checkout@v4
+
+      - name: Construire les images Docker
+        run: docker compose build
+
+      - name: Demarrer les services
+        run: docker compose up -d
+
+      - name: Attendre que les services soient prets
+        run: |
+          for port in 5001 5002 5003 8080; do
+            ok=0
+            for i in $(seq 1 30); do
+              if curl -sf "http://localhost:$port/health" > /dev/null; then ok=1; break; fi
+              sleep 2
+            done
+            if [ "$ok" -ne 1 ]; then echo "Le service du port $port ne repond pas"; exit 1; fi
+            echo "Service du port $port pret"
+          done
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les outils de test
+        run: pip install pytest==8.3.3 requests==2.32.3
+
+      - name: Lancer les tests automatiques
+        run: pytest -v tests
+
+      - name: Afficher les journaux en cas d'echec
+        if: failure()
+        run: docker compose logs
+
+      - name: Arreter les services
+        if: always()
+        run: docker compose down -v

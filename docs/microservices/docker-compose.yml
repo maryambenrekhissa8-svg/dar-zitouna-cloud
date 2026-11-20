@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=dar_zitouna
+      - POSTGRES_PASSWORD=dar_zitouna_mdp
+      - POSTGRES_DB=dar_zitouna
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - dar-zitouna-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U dar_zitouna -d dar_zitouna"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  catalogue:
+    build: ./catalogue
+    container_name: catalogue
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - DATABASE_URL=postgresql://dar_zitouna:dar_zitouna_mdp@postgres:5432/catalogue_db
+    networks:
+      - dar-zitouna-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notifications:
+    build: ./notifications
+    container_name: notifications
+    ports:
+      - "5003:5003"
+    environment:
+      - PORT=5003
+      - DATABASE_URL=postgresql://dar_zitouna:dar_zitouna_mdp@postgres:5432/notifications_db
+    networks:
+      - dar-zitouna-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  commandes:
+    build: ./commandes
+    container_name: commandes
+    ports:
+      - "5002:5002"
+    environment:
+      - PORT=5002
+      - DATABASE_URL=postgresql://dar_zitouna:dar_zitouna_mdp@postgres:5432/commandes_db
+      - CATALOGUE_URL=http://catalogue:5001
+      - NOTIFICATIONS_URL=http://notifications:5003
+    networks:
+      - dar-zitouna-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      catalogue:
+        condition: service_started
+      notifications:
+        condition: service_started
+
+  site:
+    build: ./site
+    container_name: site
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - CATALOGUE_URL=http://catalogue:5001
+      - COMMANDES_URL=http://commandes:5002
+      - NOTIFICATIONS_URL=http://notifications:5003
+    networks:
+      - dar-zitouna-net
+    depends_on:
+      - catalogue
+      - commandes
+      - notifications
+
+networks:
+  dar-zitouna-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
